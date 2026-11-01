@@ -1,0 +1,28 @@
+# IMPORTANT: this file must live at exactly this path in your repo:
+#   .github/workflows/gold_alert.yml
+# (GitHub only runs workflow files found in that exact folder.)
+
+name: Gold Slack Alert
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # every 5 minutes
+  workflow_dispatch: {}      # lets you click "Run workflow" to test manually
+
+jobs:
+  check-gold:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install yfinance pandas requests
+
+      - name: Run alert check
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: python gold_alert.py
