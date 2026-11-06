@@ -1,81 +1,100 @@
-"""
-gold_alert.py
-
-Checks gold for an EMA9/EMA21 crossover and posts a message to Slack
-if one just happened. Meant to be run automatically every few minutes
-by GitHub Actions, so nothing needs to stay on on your phone or a PC.
-
-Price comes from Yahoo Finance (gold futures, ticker GC=F) — not
-directly from AMarkets — so it can differ slightly from your broker's
-exact quote. Treat this as an alert to go check MT5, not an exact
-execution price.
-
-This is a placeholder rule (EMA9/EMA21 cross). Once you've tested and
-trust a real entry rule, replace the logic inside check_crossover().
-"""
 
 import os
 import sys
 import requests
 import yfinance as yf
 
-TICKER = "GC=F"    # COMEX gold futures — close proxy for XAUUSD
+TICKER = "GC=F"
 INTERVAL = "5m"
-LOOKBACK = "5d"     # enough 5-minute bars to compute EMA21 cleanly
+LOOKBACK = "5d"
+
 FAST = 9
 SLOW = 21
 
 
-def get_webhook_url():
-    url = os.environ.get("SLACK_WEBHOOK_URL")
-    if not url:
-        print("SLACK_WEBHOOK_URL secret is not set in the repo.")
+def get_ntfy_topic():
+    topic = os.environ.get("NTFY_TOPIC")
+    if not topic:
+        print("NTFY_TOPIC secret is not set")
         sys.exit(1)
-    return url
+    return topic
 
 
 def fetch_prices():
-    data = yf.download(TICKER, interval=INTERVAL, period=LOOKBACK, progress=False)
+    data = yf.download(
+        TICKER,
+        period=LOOKBACK,
+        interval=INTERVAL,
+        progress=False
+    )
+
+    if data.empty or len(data) < SLOW + 2:
+        print("Not enough price data")
+        sys.exit(0)
+
     if isinstance(data.columns, __import__("pandas").MultiIndex):
         data.columns = data.columns.get_level_values(0)
-    if data.empty or len(data) < SLOW + 2:
-        print("Not enough data returned yet — will try again next run.")
-        sys.exit(0)
+
     return data
 
 
 def check_crossover(data):
-    data["EMA_fast"] = data["Close"].ewm(span=FAST, adjust=False).mean()
-    data["EMA_slow"] = data["Close"].ewm(span=SLOW, adjust=False).mean()
+    close = data["Close"].dropna()
 
-    last = data.iloc[-1]
-    prev = data.iloc[-2]
+    ema_fast = close.ewm(span=FAST, adjust=False).mean()
+    ema_slow = close.ewm(span=SLOW, adjust=False).mean()
 
-    cross_up = prev["EMA_fast"] <= prev["EMA_slow"] and last["EMA_fast"] > last["EMA_slow"]
-    cross_down = prev["EMA_fast"] >= prev["EMA_slow"] and last["EMA_fast"] < last["EMA_slow"]
+    cross_up = (
+        ema_fast.iloc[-2] <= ema_slow.iloc[-2]
+        and ema_fast.iloc[-1] > ema_slow.iloc[-1]
+    )
 
-    return cross_up, cross_down, float(last["Close"])
+    cross_down = (
+        ema_fast.iloc[-2] >= ema_slow.iloc[-2]
+        and ema_fast.iloc[-1] < ema_slow.iloc[-1]
+    )
+
+    return cross_up, cross_down, float(close.iloc[-1])
 
 
-def send_slack(webhook_url, text):
-    resp = requests.post(webhook_url, json={"text": text}, timeout=10)
-    print("Slack response:", resp.status_code, resp.text)
+def send_ntfy(topic, message):
+    response = requests.post(
+        f"https://ntfy.sh/{topic}",
+        data=message.encode("utf-8"),
+        headers={
+            "Title": "Gold Alert XAUUSD",
+            "Priority": "high"
+        },
+        timeout=15
+    )
+    response.raise_for_status()
+    print("ntfy response:", response.status_code)
 
 
 def main():
-    webhook_url = get_webhook_url()
+    topic = get_ntfy_topic()
     data = fetch_prices()
+
     cross_up, cross_down, price = check_crossover(data)
 
-    print(f"Latest gold price: {price:.2f} | cross_up={cross_up} cross_down={cross_down}")
+    print(f"Gold price: {price:.2f}")
 
     if cross_up:
-        send_slack(webhook_url, f"📈 Gold: EMA{FAST} crossed above EMA{SLOW} — price ~{price:.2f}")
+        send_ntfy(
+            topic,
+            f"BUY SIGNAL: EMA{FAST} crossed above EMA{SLOW}. Price: {price:.2f}"
+        )
+
     elif cross_down:
-        send_slack(webhook_url, f"📉 Gold: EMA{FAST} crossed below EMA{SLOW} — price ~{price:.2f}")
+        send_ntfy(
+            topic,
+            f"SELL SIGNAL: EMA{FAST} crossed below EMA{SLOW}. Price: {price:.2f}"
+        )
+
     else:
-        print("No crossover this run — staying quiet.")
+        print("No crossover")
 
 
 if __name__ == "__main__":
     main()
+
