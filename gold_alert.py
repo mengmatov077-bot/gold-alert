@@ -73,6 +73,7 @@ def send_ntfy(topic, message):
 
 def main():
     topic = get_ntfy_topic()
+    send_ntfy(topic, "TEST: Gold Alert connected successfully!")
     data = fetch_prices()
 
     cross_up, cross_down, price = check_crossover(data)
