@@ -58,6 +58,9 @@ def check_crossover(data):
 
 
 def send_ntfy(topic, message):
+    print("Sending notification...")
+    print("Topic:", topic)
+
     response = requests.post(
         f"https://ntfy.sh/{topic}",
         data=message.encode("utf-8"),
@@ -67,8 +70,12 @@ def send_ntfy(topic, message):
         },
         timeout=15
     )
+
+    print("HTTP status:", response.status_code)
+    print("Response:", response.text)
+
     response.raise_for_status()
-    print("ntfy response:", response.status_code)
+    print("Notification sent successfully!")
 
 
 def main():
